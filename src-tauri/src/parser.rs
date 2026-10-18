@@ -30,6 +30,7 @@ use crate::api::DjiApi;
 use crate::database::Database;
 use crate::airdata_parser::AirdataParser;
 use crate::dronelogbook_parser::DroneLogbookParser;
+use crate::goggles_parser::GogglesParser;
 use crate::litchi_parser::LitchiParser;
 use crate::models::{FlightMessage, FlightMetadata, FlightStats, TelemetryPoint};
 
@@ -136,7 +137,7 @@ pub enum ParserError {
     #[error("Parsing timed out after {0} seconds — file may be corrupt or unsupported")]
     Timeout(u64),
 
-    #[error("Incompatible file format — only DJI flight logs (.txt), Litchi CSV exports, Airdata CSV exports, and Open DroneLog CSV exports are supported")]
+    #[error("Incompatible file format — only DJI flight logs (.txt), Litchi CSV exports, Airdata CSV exports, DJI goggles telemetry CSVs, and Open DroneLog CSV exports are supported")]
     IncompatibleFile,
 }
 
@@ -223,6 +224,12 @@ impl<'a> LogParser<'a> {
         } else if AirdataParser::is_airdata_csv(file_path) {
             log::info!("Detected Airdata CSV format, using AirdataParser");
             match AirdataParser::new(self.db).parse(file_path, &file_hash) {
+                Ok(res) => return Ok(res),
+                Err(e) => builtin_err = e,
+            }
+        } else if GogglesParser::is_goggles_csv(file_path) {
+            log::info!("Detected DJI goggles telemetry CSV format, using GogglesParser");
+            match GogglesParser::new(self.db).parse(file_path, &file_hash) {
                 Ok(res) => return Ok(res),
                 Err(e) => builtin_err = e,
             }

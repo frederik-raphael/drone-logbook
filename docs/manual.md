@@ -120,6 +120,7 @@ The application is divided into three main areas:
 | DJI Flight Logs | `.txt` | Modern DJI format from DJI Fly app |
 | Litchi CSV | `.csv` | Exported from Litchi app |
 | Airdata CSV | `.csv` | Exported from airdata.com (all unit settings supported) |
+| DJI Goggles telemetry CSV | `.csv` | `telemetry_*.csv` recorded on DJI goggles (DJI drones, or FPV quads with ExpressLRS telemetry) |
 | External Parser Plugins | Depends on plugin | User-defined parsers configured via `parsers.json` |
 
 ### Import Methods
@@ -467,6 +468,7 @@ When enabled, the app automatically generates descriptive tags during import:
 | **Continent** | Reverse geocoded from takeoff coordinates |
 | **Litchi** | Flight was imported from Litchi CSV |
 | **Airdata** | Flight was imported from Airdata CSV |
+| **DJI Goggles** | Flight was imported from a DJI goggles telemetry CSV |
 | **Manual Entry** | Flight was created via manual entry (no log file) |
 
 ### Manual Tags

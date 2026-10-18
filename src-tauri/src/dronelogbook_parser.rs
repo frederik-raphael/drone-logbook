@@ -190,7 +190,7 @@ impl<'a> DroneLogbookParser<'a> {
     }
 
     /// Parse CSV field with proper quote handling
-    fn parse_csv_line(line: &str) -> Vec<String> {
+    pub(crate) fn parse_csv_line(line: &str) -> Vec<String> {
         let mut fields = Vec::new();
         let mut current = String::new();
         let mut in_quotes = false;

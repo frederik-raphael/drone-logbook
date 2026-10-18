@@ -616,6 +616,13 @@ impl<'a> DroneLogbookParser<'a> {
                 rc_uplink: col_map.get_i32(fields, "rc_uplink"),
                 rc_downlink: col_map.get_i32(fields, "rc_downlink"),
 
+                // RC link telemetry (optional; emitted by EdgeTX/ExpressLRS-style plugins)
+                rc_uplink_rssi: col_map.get_i32(fields, "rc_uplink_rssi_dbm"),
+                rc_uplink_snr: col_map.get_i32(fields, "rc_uplink_snr_db"),
+                rc_downlink_rssi: col_map.get_i32(fields, "rc_downlink_rssi_dbm"),
+                rc_downlink_snr: col_map.get_i32(fields, "rc_downlink_snr_db"),
+                rc_tx_power: col_map.get_i32(fields, "rc_tx_power_mw"),
+
                 // RC stick inputs
                 rc_aileron: col_map.get_f64(fields, "rc_aileron"),
                 rc_elevator: col_map.get_f64(fields, "rc_elevator"),
@@ -833,4 +840,52 @@ fn extract_datetime_from_filename(filename: &str) -> Option<DateTime<Utc>> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::TelemetryData;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_rc_link_columns_round_trip() {
+        let temp_dir = tempdir().unwrap();
+        let db = Database::new(temp_dir.path().to_path_buf(), "default").unwrap();
+
+        let csv_path = temp_dir.path().join("rc_link.csv");
+        let mut file = File::create(&csv_path).unwrap();
+        writeln!(file, "time_s,lat,lng,alt_m,distance_to_home_m,vps_height_m,rc_uplink,rc_downlink,rc_uplink_rssi_dbm,rc_uplink_snr_db,rc_downlink_rssi_dbm,rc_downlink_snr_db,rc_tx_power_mw").unwrap();
+        writeln!(file, "0,47.0,8.0,0,0,,100,100,-45,9,-50,7,25").unwrap();
+        writeln!(file, "1,47.0001,8.0001,10,11,,0,80,-108,0,,-3,250").unwrap();
+        drop(file);
+
+        assert!(DroneLogbookParser::is_dronelogbook_csv(&csv_path));
+        let result = DroneLogbookParser::new(&db).parse(&csv_path, "rc-link-test").unwrap();
+        assert_eq!(result.points.len(), 2);
+
+        let p = &result.points[1];
+        assert_eq!(p.rc_uplink, Some(0));
+        assert_eq!(p.rc_uplink_rssi, Some(-108));
+        assert_eq!(p.rc_uplink_snr, Some(0));
+        assert_eq!(p.rc_downlink_rssi, None);
+        assert_eq!(p.rc_downlink_snr, Some(-3));
+        assert_eq!(p.rc_tx_power, Some(250));
+
+        // Store and read back through both the raw and the downsampled query,
+        // which select the columns separately
+        let flight_id = db.insert_flight(&result.metadata).unwrap();
+        db.bulk_insert_telemetry(flight_id, &result.points).unwrap();
+        for max_points in [None, Some(1)] {
+            let records = db.get_flight_telemetry(flight_id, max_points, None).unwrap();
+            assert_eq!(records.len(), 2);
+            let json = serde_json::to_value(TelemetryData::from_records(&records)).unwrap();
+            assert_eq!(json["rcUplinkRssi"], serde_json::json!([-45, -108]));
+            assert_eq!(json["rcUplinkSnr"], serde_json::json!([9, 0]));
+            assert_eq!(json["rcDownlinkRssi"], serde_json::json!([-50, null]));
+            assert_eq!(json["rcDownlinkSnr"], serde_json::json!([7, -3]));
+            assert_eq!(json["rcTxPower"], serde_json::json!([25, 250]));
+        }
+    }
 }

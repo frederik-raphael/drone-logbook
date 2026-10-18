@@ -75,6 +75,11 @@ const TELEMETRY_FIELDS: TelemetryFieldDef[] = [
   { id: 'rcSignal', label: 'telemetry.rcSignal', color: '#22c55e', dataKey: 'rcSignal', unit: '%', group: 'rc' },
   { id: 'rcUplink', label: 'telemetry.rcUplink', color: '#84cc16', dataKey: 'rcUplink', unit: '%', group: 'rc' },
   { id: 'rcDownlink', label: 'telemetry.rcDownlink', color: '#0369a1', dataKey: 'rcDownlink', unit: '%', group: 'rc' },
+  { id: 'rcUplinkRssi', label: 'telemetry.rcUplinkRssi', color: '#4ade80', dataKey: 'rcUplinkRssi', unit: 'dBm', group: 'rc' },
+  { id: 'rcDownlinkRssi', label: 'telemetry.rcDownlinkRssi', color: '#38bdf8', dataKey: 'rcDownlinkRssi', unit: 'dBm', group: 'rc' },
+  { id: 'rcUplinkSnr', label: 'telemetry.rcUplinkSnr', color: '#eab308', dataKey: 'rcUplinkSnr', unit: 'dB', group: 'rc' },
+  { id: 'rcDownlinkSnr', label: 'telemetry.rcDownlinkSnr', color: '#c084fc', dataKey: 'rcDownlinkSnr', unit: 'dB', group: 'rc' },
+  { id: 'rcTxPower', label: 'telemetry.rcTxPower', color: '#fb923c', dataKey: 'rcTxPower', unit: 'mW', group: 'rc' },
 
   // GPS group
   { id: 'satellites', label: 'telemetry.gpsSatellites', color: '#0ea5e9', dataKey: 'satellites', unit: '', group: 'gps' },
@@ -160,11 +165,11 @@ function getFieldData(
     return rawData.map(v => (v === null || v === undefined || v === 0) ? null : v);
   }
 
-  // RC signal quality: treat 0 as unavailable/no sample for display.
+  // RC link quality: leading/trailing 0 means no link data, mid-flight 0 is a real link loss.
   if (fieldId === 'rcSignal' || fieldId === 'rcUplink' || fieldId === 'rcDownlink') {
     const rawData = data[fieldId as ('rcSignal' | 'rcUplink' | 'rcDownlink')];
     if (!rawData || !Array.isArray(rawData)) return [];
-    return rawData.map(v => (v === null || v === undefined || v === 0) ? null : v);
+    return trimLinkQualityZeros(rawData);
   }
 
   const rawData = data[field.dataKey as keyof TelemetryData];
@@ -178,6 +183,37 @@ function getFieldData(
   return (rawData as (number | null)[]).map(v =>
     v === null || v === undefined ? null : v * factor
   );
+}
+
+/**
+ * Link quality (%) is reported as 0 both when there is no link data yet / anymore
+ * (e.g. DJI logs before the RC connects) and during a real mid-flight failsafe
+ * (e.g. ExpressLRS/Crossfire). Only the leading and trailing runs of 0 are treated
+ * as missing; zeros between non-zero samples are kept so link drops stay visible.
+ */
+function trimLinkQualityZeros(series?: (number | null)[]): (number | null)[] {
+  const values = series ?? [];
+  const hasLink = (v: number | null | undefined) => v !== null && v !== undefined && v !== 0;
+  const first = values.findIndex(hasLink);
+  let last = values.length - 1;
+  while (last >= 0 && !hasLink(values[last])) last -= 1;
+  return values.map((v, i) => {
+    if (v === null || v === undefined) return null;
+    return v === 0 && (first === -1 || i < first || i > last) ? null : v;
+  });
+}
+
+/**
+ * Selection to show in an RC panel. A selection made only of the panel's own fields,
+ * none of which this log has, would be an empty chart: show the panel fields the log
+ * does have instead. Any other selection (e.g. a user-picked altitude) is kept as is.
+ */
+function resolveRcPanelFields(selected: string[], panelFields: string[], available: string[]): string[] {
+  const onlyPanelFields = selected.every(id => panelFields.includes(id));
+  if (!onlyPanelFields || available.length === 0 || selected.some(id => available.includes(id))) {
+    return selected;
+  }
+  return available.slice(0, 4); // the field picker allows at most 4
 }
 
 /** Get the unit string for a field based on unit system */
@@ -203,6 +239,8 @@ function getUnitCategoryLabel(unit: string, t: TFn): string {
     '%': 'Percent (%)',
     'V': t('telemetry.cellVoltageV'),
     '°C': t('telemetry.tempC'),
+    'dBm': t('telemetry.rssiDbm'),
+    'dB': t('telemetry.snrDb'),
   };
   return unitCategories[unit] || unit;
 }
@@ -360,11 +398,11 @@ function createDynamicChart(
     group.data.push(...s.data);
   });
 
-  // Assign y-axis indices based on unique units (max 2 axes)
+  // Assign one y-axis per unique unit (only the first 2 are drawn, see below)
   const uniqueUnits = Array.from(unitGroups.keys());
   const unitToAxisIndex = new Map<string, number>();
   uniqueUnits.forEach((unit, idx) => {
-    unitToAxisIndex.set(unit, Math.min(idx, 1)); // Clamp to max 2 axes (index 0 and 1)
+    unitToAxisIndex.set(unit, idx);
   });
 
   // Compute combined ranges for each unit group
@@ -402,12 +440,25 @@ function createDynamicChart(
     };
   });
 
-  // Create Y-axes based on unique units (max 2)
+  // Create Y-axes based on unique units. Only 2 fit visibly; any further unit
+  // gets a hidden axis so it keeps its own scale instead of borrowing the 2nd one.
   const yAxis: any[] = [];
-  const axisUnits = uniqueUnits.slice(0, 2); // Max 2 axes
-  axisUnits.forEach((unit, axisIndex) => {
+  uniqueUnits.forEach((unit, axisIndex) => {
     const group = unitGroups.get(unit)!;
     const range = unitRanges.get(unit)!;
+    if (axisIndex >= 2) {
+      yAxis.push({
+        type: 'value',
+        position: 'right',
+        min: range.min,
+        max: range.max,
+        axisLabel: { show: false },
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { show: false },
+      });
+      return;
+    }
     // Use the first series with this unit for display properties
     const firstSeriesIndex = group.indices[0];
     const s = displaySeriesData[firstSeriesIndex];
@@ -469,6 +520,7 @@ interface TelemetryChartsConfig {
   attitude: ChartPanelConfig;
   gimbal: ChartPanelConfig;
   rcSignal: ChartPanelConfig;
+  rcLink: ChartPanelConfig;
   distanceToHome: ChartPanelConfig;
   velocity: ChartPanelConfig;
   gps: ChartPanelConfig;
@@ -483,6 +535,7 @@ const DEFAULT_CHART_CONFIGS: TelemetryChartsConfig = {
   attitude: { title: null, selectedFields: ['pitch', 'roll', 'yaw'] },
   gimbal: { title: null, selectedFields: ['gimbalPitch', 'gimbalRoll', 'gimbalYaw'] },
   rcSignal: { title: null, selectedFields: ['rcSignal'] }, // Will be overridden if uplink/downlink available
+  rcLink: { title: null, selectedFields: ['rcUplinkRssi', 'rcDownlinkRssi', 'rcUplinkSnr', 'rcDownlinkSnr'] },
   distanceToHome: { title: null, selectedFields: ['distanceToHome'] },
   velocity: { title: null, selectedFields: ['velocityX', 'velocityY', 'velocityZ'] },
   gps: { title: null, selectedFields: ['satellites'] },
@@ -1057,9 +1110,29 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
     [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, chartConfigs.attitude, t, telemetryColors]
   );
 
+  // The RC panels default to fields many logs don't have (Litchi and custom-parser logs
+  // often have uplink/downlink but no combined rcSignal; logs carry different RSSI/SNR/TX
+  // power subsets). Resolved once so the chart and its field picker agree.
+  const rcSignalConfig = useMemo(() => {
+    const panelFields = ['rcSignal', 'rcUplink', 'rcDownlink'];
+    const available = panelFields.filter(id => data[id as 'rcSignal']?.some(v => v !== null && v !== undefined && v !== 0));
+    return { ...chartConfigs.rcSignal, selectedFields: resolveRcPanelFields(chartConfigs.rcSignal.selectedFields, panelFields, available) };
+  }, [data, chartConfigs.rcSignal]);
+
+  const rcLinkAvailableFields = useMemo(
+    () => ['rcUplinkRssi', 'rcDownlinkRssi', 'rcUplinkSnr', 'rcDownlinkSnr', 'rcTxPower']
+      .filter(id => data[id as 'rcUplinkRssi']?.some(v => v !== null && v !== undefined)),
+    [data]
+  );
+
+  const rcLinkConfig = useMemo(() => {
+    const panelFields = ['rcUplinkRssi', 'rcDownlinkRssi', 'rcUplinkSnr', 'rcDownlinkSnr', 'rcTxPower'];
+    return { ...chartConfigs.rcLink, selectedFields: resolveRcPanelFields(chartConfigs.rcLink.selectedFields, panelFields, rcLinkAvailableFields) };
+  }, [chartConfigs.rcLink, rcLinkAvailableFields]);
+
   const rcSignalOption = useMemo(
     () => {
-      const config = chartConfigs.rcSignal;
+      const config = rcSignalConfig;
       if (config.selectedFields.length > 0) {
         return createDynamicChart(
           config.selectedFields,
@@ -1074,7 +1147,25 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
       }
       return createRcSignalChart(data, splitLineColor, tooltipFormatter, tooltipColors, t);
     },
-    [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, chartConfigs.rcSignal, t, telemetryColors]
+    [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, rcSignalConfig, t, telemetryColors]
+  );
+
+  // RC Link chart (RSSI/SNR/TX power) - only show if data exists
+  const rcLinkOption = useMemo(
+    () => {
+      if (rcLinkAvailableFields.length === 0 || rcLinkConfig.selectedFields.length === 0) return null;
+      return createDynamicChart(
+        rcLinkConfig.selectedFields,
+        data,
+        unitPrefs,
+        splitLineColor,
+        tooltipFormatter,
+        tooltipColors,
+        t,
+        telemetryColors
+      );
+    },
+    [data, splitLineColor, tooltipColors, tooltipFormatter, unitPrefs, rcLinkAvailableFields, rcLinkConfig, t, telemetryColors]
   );
 
   const gimbalOption = useMemo(
@@ -1370,7 +1461,7 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
       {/* RC Signal Chart */}
       <div>
         <ChartHeader
-          config={chartConfigs.rcSignal}
+          config={rcSignalConfig}
           availableFields={TELEMETRY_FIELDS}
           onFieldsChange={(fields) => updateChartConfig('rcSignal', { selectedFields: fields })}
           unitPrefs={unitPrefs}
@@ -1389,6 +1480,31 @@ export function TelemetryCharts({ data, unitPrefs, startTime }: TelemetryChartsP
           />
         </div>
       </div>
+
+      {/* RC Link Chart - only shown if RSSI/SNR/TX power data exists */}
+      {rcLinkOption && (
+        <div>
+          <ChartHeader
+            config={rcLinkConfig}
+            availableFields={TELEMETRY_FIELDS}
+            onFieldsChange={(fields) => updateChartConfig('rcLink', { selectedFields: fields })}
+            unitPrefs={unitPrefs}
+            theme={resolvedTheme}
+            getFieldColor={getFieldColor}
+            onFieldColorChange={setTelemetryColor}
+            onFieldColorReset={resetTelemetryColor}
+          />
+          <div className={`h-52 ${mapSyncEnabled ? 'pointer-events-none' : ''}`}>
+            <ReactECharts
+              option={rcLinkOption}
+              style={{ height: '100%', width: '100%' }}
+              opts={{ renderer: 'canvas' }}
+              notMerge={true}
+              onChartReady={registerChart}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Distance to Home Chart */}
       <div>
@@ -2211,12 +2327,9 @@ function createRcSignalChart(
   tooltipColors: TooltipColors,
   t: TFn
 ): EChartsOption {
-  const sanitizeRcSeries = (series?: (number | null)[]): (number | null)[] =>
-    (series ?? []).map((val) => (val === 0 ? null : val));
-
-  const rcSignal = sanitizeRcSeries(data.rcSignal);
-  const rcUplink = sanitizeRcSeries(data.rcUplink);
-  const rcDownlink = sanitizeRcSeries(data.rcDownlink);
+  const rcSignal = trimLinkQualityZeros(data.rcSignal);
+  const rcUplink = trimLinkQualityZeros(data.rcUplink);
+  const rcDownlink = trimLinkQualityZeros(data.rcDownlink);
   const hasUplink = rcUplink.some((val) => val !== null && val !== undefined);
   const hasDownlink = rcDownlink.some((val) => val !== null && val !== undefined);
   const showCombined = !hasUplink && !hasDownlink;

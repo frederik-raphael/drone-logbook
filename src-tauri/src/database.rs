@@ -297,6 +297,9 @@ impl Database {
                 -- Camera state
                 is_photo        BOOLEAN,
                 is_video        BOOLEAN
+
+                -- battery_full_capacity, battery_remained_capacity and the RC link
+                -- columns (rc_uplink_rssi, ...) are appended by migrate_telemetry_table()
             );
 
             -- Index for time-range queries within a flight
@@ -482,6 +485,11 @@ impl Database {
             ("cell_voltages", "ALTER TABLE telemetry ADD COLUMN cell_voltages VARCHAR"),
             ("battery_full_capacity", "ALTER TABLE telemetry ADD COLUMN battery_full_capacity FLOAT"),
             ("battery_remained_capacity", "ALTER TABLE telemetry ADD COLUMN battery_remained_capacity FLOAT"),
+            ("rc_uplink_rssi", "ALTER TABLE telemetry ADD COLUMN rc_uplink_rssi INTEGER"),
+            ("rc_uplink_snr", "ALTER TABLE telemetry ADD COLUMN rc_uplink_snr INTEGER"),
+            ("rc_downlink_rssi", "ALTER TABLE telemetry ADD COLUMN rc_downlink_rssi INTEGER"),
+            ("rc_downlink_snr", "ALTER TABLE telemetry ADD COLUMN rc_downlink_snr INTEGER"),
+            ("rc_tx_power", "ALTER TABLE telemetry ADD COLUMN rc_tx_power INTEGER"),
         ];
 
         for (col_name, sql) in migrations {
@@ -719,6 +727,11 @@ impl Database {
                 is_video        BOOLEAN,
                 battery_full_capacity FLOAT,
                 battery_remained_capacity FLOAT,
+                rc_uplink_rssi  INTEGER,
+                rc_uplink_snr   INTEGER,
+                rc_downlink_rssi INTEGER,
+                rc_downlink_snr INTEGER,
+                rc_tx_power     INTEGER,
                 PRIMARY KEY (flight_id, timestamp_ms)
             );
             
@@ -760,7 +773,12 @@ impl Database {
                 is_photo,
                 is_video,
                 CAST(battery_full_capacity AS FLOAT),
-                CAST(battery_remained_capacity AS FLOAT)
+                CAST(battery_remained_capacity AS FLOAT),
+                rc_uplink_rssi,
+                rc_uplink_snr,
+                rc_downlink_rssi,
+                rc_downlink_snr,
+                rc_tx_power
             FROM telemetry;
             
             DROP TABLE telemetry;
@@ -837,6 +855,11 @@ impl Database {
             "is_video",
             "battery_full_capacity",
             "battery_remained_capacity",
+            "rc_uplink_rssi",
+            "rc_uplink_snr",
+            "rc_downlink_rssi",
+            "rc_downlink_snr",
+            "rc_tx_power",
         ];
 
         let mut stmt = conn.prepare("PRAGMA table_info('telemetry')")?;
@@ -908,7 +931,12 @@ impl Database {
                 is_photo        BOOLEAN,
                 is_video        BOOLEAN,
                 battery_full_capacity FLOAT,
-                battery_remained_capacity FLOAT
+                battery_remained_capacity FLOAT,
+                rc_uplink_rssi  INTEGER,
+                rc_uplink_snr   INTEGER,
+                rc_downlink_rssi INTEGER,
+                rc_downlink_snr INTEGER,
+                rc_tx_power     INTEGER
             );
             
             INSERT INTO telemetry_reordered SELECT {} FROM telemetry;
@@ -1040,6 +1068,11 @@ impl Database {
                 point.is_video,
                 point.battery_full_capacity,
                 point.battery_remained_capacity,
+                point.rc_uplink_rssi,
+                point.rc_uplink_snr,
+                point.rc_downlink_rssi,
+                point.rc_downlink_snr,
+                point.rc_tx_power,
             ]) {
                 Ok(()) => inserted += 1,
                 Err(err) => {
@@ -1362,7 +1395,12 @@ impl Database {
                 is_photo,
                 is_video,
                 battery_full_capacity,
-                battery_remained_capacity
+                battery_remained_capacity,
+                rc_uplink_rssi,
+                rc_uplink_snr,
+                rc_downlink_rssi,
+                rc_downlink_snr,
+                rc_tx_power
             FROM telemetry
             WHERE flight_id = ?
             ORDER BY timestamp_ms ASC
@@ -1403,6 +1441,11 @@ impl Database {
                     rc_signal: row.get(22)?,
                     rc_uplink: row.get(23)?,
                     rc_downlink: row.get(24)?,
+                    rc_uplink_rssi: row.get(33)?,
+                    rc_uplink_snr: row.get(34)?,
+                    rc_downlink_rssi: row.get(35)?,
+                    rc_downlink_snr: row.get(36)?,
+                    rc_tx_power: row.get(37)?,
                     rc_aileron: row.get(25)?,
                     rc_elevator: row.get(26)?,
                     rc_throttle: row.get(27)?,
@@ -1485,7 +1528,12 @@ impl Database {
                     BOOL_OR(is_photo) AS is_photo,
                     BOOL_OR(is_video) AS is_video,
                     AVG(battery_full_capacity) AS battery_full_capacity,
-                    AVG(battery_remained_capacity) AS battery_remained_capacity
+                    AVG(battery_remained_capacity) AS battery_remained_capacity,
+                    AVG(rc_uplink_rssi)::INTEGER AS rc_uplink_rssi,
+                    AVG(rc_uplink_snr)::INTEGER AS rc_uplink_snr,
+                    AVG(rc_downlink_rssi)::INTEGER AS rc_downlink_rssi,
+                    AVG(rc_downlink_snr)::INTEGER AS rc_downlink_snr,
+                    AVG(rc_tx_power)::INTEGER AS rc_tx_power
                 FROM telemetry
                 WHERE flight_id = ?
                 GROUP BY bucket_ts
@@ -1529,6 +1577,11 @@ impl Database {
                     rc_signal: row.get(22)?,
                     rc_uplink: row.get(23)?,
                     rc_downlink: row.get(24)?,
+                    rc_uplink_rssi: row.get(33)?,
+                    rc_uplink_snr: row.get(34)?,
+                    rc_downlink_rssi: row.get(35)?,
+                    rc_downlink_snr: row.get(36)?,
+                    rc_tx_power: row.get(37)?,
                     rc_aileron: row.get(25)?,
                     rc_elevator: row.get(26)?,
                     rc_throttle: row.get(27)?,
@@ -3281,5 +3334,35 @@ mod tests {
         // Verify we can get flights (empty)
         let flights = db.get_all_flights().unwrap();
         assert!(flights.is_empty());
+    }
+
+    #[test]
+    fn test_rc_link_columns_added_to_existing_database() {
+        let temp_dir = tempdir().unwrap();
+        let rc_link_cols = ["rc_uplink_rssi", "rc_uplink_snr", "rc_downlink_rssi", "rc_downlink_snr", "rc_tx_power"];
+
+        // Simulate a database created before the RC link columns existed
+        {
+            let db = Database::new(temp_dir.path().to_path_buf(), "default").unwrap();
+            let conn = db.conn.lock().unwrap();
+            // DuckDB refuses DROP COLUMN while an index depends on the table;
+            // reopening recreates it, so the migration still runs against an
+            // indexed table like a real upgrade does.
+            conn.execute_batch("DROP INDEX idx_telemetry_flight_time").unwrap();
+            for col in rc_link_cols {
+                conn.execute_batch(&format!("ALTER TABLE telemetry DROP COLUMN {}", col)).unwrap();
+            }
+        }
+
+        let db = Database::new(temp_dir.path().to_path_buf(), "default").unwrap();
+        let conn = db.conn.lock().unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info('telemetry')").unwrap();
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        // Appended at the end, matching the appender order in bulk_insert_telemetry
+        assert_eq!(&columns[columns.len() - rc_link_cols.len()..], &rc_link_cols);
     }
 }

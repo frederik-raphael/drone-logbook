@@ -513,6 +513,11 @@ impl<'a> AirdataParser<'a> {
             rc_signal: None,
             rc_uplink: None,
             rc_downlink: None,
+            rc_uplink_rssi: None,
+            rc_uplink_snr: None,
+            rc_downlink_rssi: None,
+            rc_downlink_snr: None,
+            rc_tx_power: None,
 
             // RC stick inputs (percent columns)
             rc_aileron,

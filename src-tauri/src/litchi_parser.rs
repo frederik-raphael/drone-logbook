@@ -343,6 +343,11 @@ impl<'a> LitchiParser<'a> {
             rc_signal: None,
             rc_uplink: col_map.get_i32(row, "uplinkSignalQuality"),
             rc_downlink: col_map.get_i32(row, "downlinkSignalQuality"),
+            rc_uplink_rssi: None,
+            rc_uplink_snr: None,
+            rc_downlink_rssi: None,
+            rc_downlink_snr: None,
+            rc_tx_power: None,
 
             // RC stick inputs
             rc_aileron: col_map.get_f64(row, "Rc_aileron"),

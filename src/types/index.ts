@@ -59,6 +59,16 @@ export interface TelemetryData {
   rcSignal: (number | null)[];
   rcUplink?: (number | null)[];
   rcDownlink?: (number | null)[];
+  /** RC uplink signal strength at the aircraft receiver in dBm */
+  rcUplinkRssi?: (number | null)[];
+  /** RC uplink signal-to-noise ratio in dB */
+  rcUplinkSnr?: (number | null)[];
+  /** RC downlink (telemetry) signal strength at the radio in dBm */
+  rcDownlinkRssi?: (number | null)[];
+  /** RC downlink signal-to-noise ratio in dB */
+  rcDownlinkSnr?: (number | null)[];
+  /** RC transmit power in mW */
+  rcTxPower?: (number | null)[];
   pitch: (number | null)[];
   roll: (number | null)[];
   yaw: (number | null)[];

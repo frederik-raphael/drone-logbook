@@ -355,6 +355,11 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
     'flight_mode',
     'battery_full_capacity_mah',
     'battery_remained_capacity_mah',
+    'rc_uplink_rssi_dbm',
+    'rc_uplink_snr_db',
+    'rc_downlink_rssi_dbm',
+    'rc_downlink_snr_db',
+    'rc_tx_power_mw',
     'messages',
     'metadata',
   ];
@@ -384,6 +389,7 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
       '', '', '', '', // rc controls
       '', '', '', // is_photo, is_video, flight_mode
       '', '', // battery_full_capacity_mah, battery_remained_capacity_mah
+      '', '', '', '', '', // rc_uplink_rssi_dbm, rc_uplink_snr_db, rc_downlink_rssi_dbm, rc_downlink_snr_db, rc_tx_power_mw
       escapeCsv(messagesJson),
       escapeCsv(metadataJson),
     ].join(',');
@@ -489,6 +495,11 @@ export function buildCsv(data: FlightDataResponse, unitPrefs?: UnitPreferences):
       getStrValue(telemetry.flightMode, index),
       getMetric(telemetry.batteryFullCapacity, index, 0), // battery_full_capacity_mah
       getMetric(telemetry.batteryRemainedCapacity, index, 0), // battery_remained_capacity_mah
+      getValue(telemetry.rcUplinkRssi, index),       // rc_uplink_rssi_dbm (integer)
+      getValue(telemetry.rcUplinkSnr, index),        // rc_uplink_snr_db (integer)
+      getValue(telemetry.rcDownlinkRssi, index),     // rc_downlink_rssi_dbm (integer)
+      getValue(telemetry.rcDownlinkSnr, index),      // rc_downlink_snr_db (integer)
+      getValue(telemetry.rcTxPower, index),          // rc_tx_power_mw (integer)
       // Messages and Metadata JSON only on first row (time 0)
       index === 0 ? messagesJson : '',
       index === 0 ? metadataJson : '',

@@ -86,6 +86,7 @@ Including these columns enables the matching charts and telemetry panels in the 
 - **Action/State**: `is_photo` (`1` or `0`), `is_video` (`1` or `0`), `flight_mode`
 - **RC Inputs**: `rc_aileron`, `rc_elevator`, `rc_throttle`, `rc_rudder`
 - **Signal**: `satellites`, `rc_signal`
+- **RC Link**: `rc_uplink`, `rc_downlink` (link quality, %), `rc_uplink_rssi_dbm`, `rc_downlink_rssi_dbm` (signal strength, dBm), `rc_uplink_snr_db`, `rc_downlink_snr_db` (signal-to-noise ratio, dB), `rc_tx_power_mw` (radio transmit power, mW). All integers.
 
 ### Metadata Column (Highly Recommended)
 You can provide flight-level metadata by embedding a JSON string inside the `Metadata` column of your CSV. This string only needs to be present in the **first data row**, and can be left blank for subsequent rows. Open-DroneLog extracts details like the drone model, pilot notes, serial numbers, and tags from this object.

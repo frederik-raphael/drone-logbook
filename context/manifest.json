@@ -5,7 +5,7 @@
     "cargoToml": "e9474fc3f116ab31bf81d0ff1a0a0c29ab17a041086ebbffcc7a02652e5402a4",
     "serverRs": "c1030c4f42c84a2641f2caaec2003bb9b6212badc5aa6aee19773dae42c7fe4a",
     "apiTs": "04a22558012248f8f271e0bfa8f4f504ed72e88d1be56a78b7aa738dc6ffd867",
-    "databaseRs": "de8e548ec9688eb24c6155798f0258dd9c2a02fe2541c361b3b4bfb1c8c20a80",
+    "databaseRs": "3b4e151ff8f0b08cf3bee1a13dbabaccb1e347ca522d15f268465e76379e3dd6",
     "readmeEnvVars": "0af4b86231dd66eadf0a5938a45d5a892377bc2a5f139ed9aee1aa4215371a64",
     "composeEnvVars": "0af4b86231dd66eadf0a5938a45d5a892377bc2a5f139ed9aee1aa4215371a64",
     "composeBuildEnvVars": "0af4b86231dd66eadf0a5938a45d5a892377bc2a5f139ed9aee1aa4215371a64"

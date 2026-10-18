@@ -123,6 +123,13 @@ pub struct TelemetryPoint {
     pub rc_uplink: Option<i32>,
     pub rc_downlink: Option<i32>,
 
+    // RC link telemetry (EdgeTX/ExpressLRS/Crossfire style)
+    pub rc_uplink_rssi: Option<i32>,
+    pub rc_uplink_snr: Option<i32>,
+    pub rc_downlink_rssi: Option<i32>,
+    pub rc_downlink_snr: Option<i32>,
+    pub rc_tx_power: Option<i32>,
+
     // RC stick inputs (normalized to -100..+100 percentage)
     pub rc_aileron: Option<f64>,
     pub rc_elevator: Option<f64>,
@@ -166,6 +173,11 @@ pub struct TelemetryRecord {
     pub rc_signal: Option<i32>,
     pub rc_uplink: Option<i32>,
     pub rc_downlink: Option<i32>,
+    pub rc_uplink_rssi: Option<i32>,
+    pub rc_uplink_snr: Option<i32>,
+    pub rc_downlink_rssi: Option<i32>,
+    pub rc_downlink_snr: Option<i32>,
+    pub rc_tx_power: Option<i32>,
     pub rc_aileron: Option<f64>,
     pub rc_elevator: Option<f64>,
     pub rc_throttle: Option<f64>,
@@ -321,6 +333,16 @@ pub struct TelemetryData {
     pub rc_uplink: Vec<Option<i32>>,
     /// RC downlink signal strength
     pub rc_downlink: Vec<Option<i32>>,
+    /// RC uplink RSSI at the aircraft receiver (dBm)
+    pub rc_uplink_rssi: Vec<Option<i32>>,
+    /// RC uplink signal-to-noise ratio (dB)
+    pub rc_uplink_snr: Vec<Option<i32>>,
+    /// RC downlink (telemetry) RSSI at the radio (dBm)
+    pub rc_downlink_rssi: Vec<Option<i32>>,
+    /// RC downlink signal-to-noise ratio (dB)
+    pub rc_downlink_snr: Vec<Option<i32>>,
+    /// RC transmit power (mW)
+    pub rc_tx_power: Vec<Option<i32>>,
     /// Pitch angle
     pub pitch: Vec<Option<f64>>,
     /// Roll angle
@@ -379,6 +401,11 @@ impl TelemetryData {
         let mut rc_signal = Vec::with_capacity(n);
         let mut rc_uplink = Vec::with_capacity(n);
         let mut rc_downlink = Vec::with_capacity(n);
+        let mut rc_uplink_rssi = Vec::with_capacity(n);
+        let mut rc_uplink_snr = Vec::with_capacity(n);
+        let mut rc_downlink_rssi = Vec::with_capacity(n);
+        let mut rc_downlink_snr = Vec::with_capacity(n);
+        let mut rc_tx_power = Vec::with_capacity(n);
         let mut pitch = Vec::with_capacity(n);
         let mut roll = Vec::with_capacity(n);
         let mut yaw = Vec::with_capacity(n);
@@ -415,6 +442,11 @@ impl TelemetryData {
             rc_signal.push(r.rc_signal);
             rc_uplink.push(r.rc_uplink);
             rc_downlink.push(r.rc_downlink);
+            rc_uplink_rssi.push(r.rc_uplink_rssi);
+            rc_uplink_snr.push(r.rc_uplink_snr);
+            rc_downlink_rssi.push(r.rc_downlink_rssi);
+            rc_downlink_snr.push(r.rc_downlink_snr);
+            rc_tx_power.push(r.rc_tx_power);
             pitch.push(r.pitch);
             roll.push(r.roll);
             yaw.push(r.yaw);
@@ -452,6 +484,11 @@ impl TelemetryData {
             rc_signal,
             rc_uplink,
             rc_downlink,
+            rc_uplink_rssi,
+            rc_uplink_snr,
+            rc_downlink_rssi,
+            rc_downlink_snr,
+            rc_tx_power,
             pitch,
             roll,
             yaw,

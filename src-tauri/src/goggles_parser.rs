@@ -10,10 +10,12 @@
 //! so each value prefers the DJI field and falls back to the ELRS one.
 //!
 //! A row is written every ~200 ms whether or not new telemetry arrived, so ELRS
-//! values repeat until the next CRSF frame and are blank until the first one.
-//! Rows without a GPS fix are skipped, and so is everything before the air unit
-//! first links up: until then the ELRS columns can still hold a stale fix from
-//! an earlier session.
+//! values repeat until the next CRSF frame. Until fresh telemetry arrives the
+//! goggles replay the last ELRS values of the previous session: across 26 real
+//! logs the first fix equalled the previous log's last one 12 times, once 7 km
+//! away. ELRS fixes therefore only count once the position first changes, and
+//! nothing before the air unit first links up counts either. Rows without a
+//! GPS fix are skipped.
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -120,11 +122,18 @@ impl<'a> GogglesParser<'a> {
 
         let mut points = Vec::new();
         let mut start_time: Option<DateTime<Utc>> = None;
-        let mut flight_mode: Option<String> = None;
+        // Modes are only filled in on some rows and are carried forward so the
+        // blanks in between don't read as mode changes. DJI and ELRS are kept
+        // apart because only the ELRS one is replayed.
+        let mut dji_mode: Option<String> = None;
+        let mut elrs_mode: Option<String> = None;
         let mut drone_model: Option<String> = None;
         let mut home: Option<(f64, f64)> = None;
         // Files without the column can't tell, so they count as linked from the start
         let mut linked = !col_map.indices.contains_key("link.aircraft.name");
+        // The first ELRS fix of the file is the replayed one
+        let mut replayed: Option<(f64, f64)> = None;
+        let mut fresh = false;
 
         for line_result in lines {
             let line = match line_result {
@@ -146,22 +155,37 @@ impl<'a> GogglesParser<'a> {
                     points.clear();
                     start_time = None;
                     home = None;
-                    flight_mode = None;
+                    dji_mode = None;
+                    elrs_mode = None;
                 }
                 if drone_model.is_none() {
                     drone_model = Some(if name.starts_with("DJI") { name.to_string() } else { format!("DJI {}", name) });
                 }
             }
-            // The flight mode is only filled in on some rows; carry it forward
-            // so the blanks in between don't read as mode changes. DJI's flyc_state
-            // is named the same way as in DJI .txt logs.
+            let elrs_fix = fix(
+                col_map.get_f64(&row, "elrs.gps.lat_deg"),
+                col_map.get_f64(&row, "elrs.gps.lon_deg"),
+            );
+            if let Some(p) = elrs_fix {
+                match replayed {
+                    None => replayed = Some(p),
+                    Some(r) if !fresh && p != r => {
+                        fresh = true;
+                        // The ELRS mode so far was replayed along with the fix
+                        elrs_mode = None;
+                    }
+                    _ => {}
+                }
+            }
+            // DJI's flyc_state is named the same way as in DJI .txt logs
             if let Some(mode) = col_map
                 .get_f64(&row, "flight.osd.flyc_state")
                 .filter(|v| (0.0..=255.0).contains(v))
-                .map(|v| format!("{:?}", FlightMode::from(v as u8)))
-                .or_else(|| col_map.get_str(&row, "elrs.flight_mode").map(str::to_string))
             {
-                flight_mode = Some(mode);
+                dji_mode = Some(format!("{:?}", FlightMode::from(mode as u8)));
+            }
+            if let Some(mode) = col_map.get_str(&row, "elrs.flight_mode") {
+                elrs_mode = Some(mode.to_string());
             }
             if home.is_none() {
                 home = fix(
@@ -182,12 +206,7 @@ impl<'a> GogglesParser<'a> {
                 col_map.get_f64(&row, "flight.osd.lat_deg"),
                 col_map.get_f64(&row, "flight.osd.lon_deg"),
             )
-            .or_else(|| {
-                fix(
-                    col_map.get_f64(&row, "elrs.gps.lat_deg"),
-                    col_map.get_f64(&row, "elrs.gps.lon_deg"),
-                )
-            }) else {
+            .or(elrs_fix.filter(|_| fresh)) else {
                 continue;
             };
 
@@ -196,7 +215,7 @@ impl<'a> GogglesParser<'a> {
             point.timestamp_ms = (time - start).num_milliseconds();
             point.latitude = Some(lat);
             point.longitude = Some(lon);
-            point.flight_mode = flight_mode.clone();
+            point.flight_mode = dji_mode.clone().or_else(|| elrs_mode.clone().filter(|_| fresh));
             points.push(point);
         }
 
@@ -365,6 +384,52 @@ elrs.link.rqly_pct,elrs.flight_mode";
         let other = dir.path().join("other.csv");
         std::fs::write(&other, "time_s,lat,lng,alt_m,height_m\n").unwrap();
         assert!(!GogglesParser::is_goggles_csv(&other));
+    }
+
+    #[test]
+    fn drops_replayed_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::new(dir.path().to_path_buf(), "default").unwrap();
+        // The replayed fix and its mode survive the link, then fresh data arrives
+        let path = write_csv(
+            dir.path(),
+            "telemetry_20261018_150921_884.csv",
+            concat!(
+                "2026-10-18T15:09:25.339+02:00,,,,,,,,,0,0,Goggles Integra,O4 Air Unit,90,47.197081,14.178217,1067,0,8100,900,90,99,ACRO\n",
+                "2026-10-18T15:09:25.539+02:00,,,,,,,,,0,0,Goggles Integra,O4 Air Unit,90,47.197081,14.178217,1067,0,8100,900,90,99,\n",
+                "2026-10-18T15:09:26.740+02:00,,,,,,,,,0,0,Goggles Integra,O4 Air Unit,90,47.229857,14.092509,1210,0,8200,900,91,99,\n",
+            ),
+        );
+        let res = GogglesParser::new(&db).parse(&path, "hash").unwrap();
+        assert_eq!(res.points.len(), 1);
+        assert_eq!((res.points[0].latitude, res.points[0].flight_mode.as_deref()), (Some(47.229857), None));
+        assert_eq!((res.metadata.home_lat, res.metadata.home_lon), (Some(47.229857), Some(14.092509)));
+        assert_eq!(res.metadata.start_time.unwrap().to_rfc3339(), "2026-10-18T13:09:26.740+00:00");
+
+        // Only the replayed fix: nothing of its own
+        let path = write_csv(
+            dir.path(),
+            "telemetry_20260809_123401_119.csv",
+            concat!(
+                "2026-08-09T12:34:01.147+02:00,,,,,,,,,0,0,Goggles Integra,O4 Air Unit,90,47.881146,13.772015,0,0,8100,900,90,99,OK\n",
+                "2026-08-09T12:34:01.347+02:00,,,,,,,,,0,0,Goggles Integra,O4 Air Unit,90,47.881146,13.772015,0,0,8100,900,90,99,\n",
+            ),
+        );
+        assert!(matches!(GogglesParser::new(&db).parse(&path, "hash2"), Err(ParserError::NoTelemetryData)));
+
+        // DJI rows count before ELRS turns fresh, without the replayed ELRS mode,
+        // and keep their DJI mode when it does
+        let path = write_csv(
+            dir.path(),
+            "telemetry_20260809_123747_417.csv",
+            concat!(
+                "2026-08-09T12:37:47.417+02:00,16.47,48.51,0,0,0,6,,,0,0,Goggles Integra,O4 Air Unit,90,47.881146,13.772015,0,0,8100,900,90,99,OLD\n",
+                "2026-08-09T12:37:47.617+02:00,16.47,48.51,0,0,0,,,,0,0,Goggles Integra,O4 Air Unit,90,47.881150,13.772020,0,0,8100,900,90,99,\n",
+            ),
+        );
+        let res = GogglesParser::new(&db).parse(&path, "hash3").unwrap();
+        let modes: Vec<_> = res.points.iter().map(|p| p.flight_mode.as_deref()).collect();
+        assert_eq!(modes, [Some("GPSAtti"), Some("GPSAtti")]);
     }
 
     #[test]
